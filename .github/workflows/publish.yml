@@ -1,0 +1,67 @@
+name: PyPI
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, ' - ')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+          cache-dependency-path: pyproject.toml
+
+      - name: Install build deps
+        run: pip install build twine tomli-w
+
+      - name: Derive version from commit history and PyPI
+        id: version
+        run: |
+          python scripts/derive_version.py "${{ github.event_name }}" >> $GITHUB_OUTPUT
+
+      - name: Update pyproject.toml version
+        if: steps.version.outputs.should_publish == 'true'
+        run: |
+          python - << 'EOF'
+          import tomli_w
+          import tomllib
+          with open("pyproject.toml", "rb") as f:
+              data = tomllib.load(f)
+          data["project"]["version"] = "${{ steps.version.outputs.version }}"
+          with open("pyproject.toml", "wb") as f:
+              tomli_w.dump(data, f)
+          EOF
+
+      - name: Build package
+        if: steps.version.outputs.should_publish == 'true'
+        run: python -m build
+
+      - name: Publish to PyPI
+        if: steps.version.outputs.should_publish == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub Release
+        if: steps.version.outputs.should_publish == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.release_title }}" \
+            --title "${{ steps.version.outputs.release_title }}" \
+            --generate-notes
