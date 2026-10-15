@@ -1,9 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/Omena0/fr-docs/main/config.schema.json",
   "project_name": "Docs",
-  "copyright_holder": "CHANGE_ME",
-  "project_url": "",
-  "site_path_prefix": "/",
+  "copyright_holder": "Omena0",
+  "project_url": "https://github.com/Omena0/docsearch",
+  "site_path_prefix": "/docsearch",
   "src_dir": "src",
   "out_dir": "site",
   "docs_dir": ".",
@@ -26,6 +26,14 @@
         [
           "configuration",
           "Configuration"
+        ],
+        [
+          "cli",
+          "CLI"
+        ],
+        [
+          "python-api",
+          "Python API"
         ]
       ]
     ]
@@ -56,16 +64,16 @@
     "ignore_dirs": []
   },
   "features": {
-    "backlinks": true,
-    "related": true,
+    "backlinks": false,
+    "related": false,
     "auto_link": true,
-    "versioning": true,
+    "versioning": false,
     "search": true,
-    "code_references": true,
+    "code_references": false,
     "link_preview": true,
     "code_highlighting": true,
     "blockquotes": true,
-    "ext_tags": true,
+    "ext_tags": false,
     "inline_copy": true
   }
 }
