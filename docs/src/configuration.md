@@ -1,100 +1,95 @@
 # Configuration
 
-## Configuration File
+docsearch can be configured via CLI options, environment variables, or Python API.
 
-Create a `config.json` in your docs directory:
+## CLI Options
 
-```json
-{
-  "project_name": "My Project",
-  "project_url": "https://github.com/user/repo",
-  "site_path_prefix": "/",
-  "src_dir": "src",
-  "out_dir": "site",
-  "docs_dir": ".",
-  "sidebar": [
-    ["Getting Started", [
-      ["index", "Home"],
-      ["installation", "Installation"]
-    ]]
-  ],
-  "source_files": {
-    "search_dirs": ["parent", "src_parent", "docs"],
-    "patterns": [
-      "docs/src/*.md",
-      "docs/*.js",
-      "docs/*.css"
-    ],
-    "ignore_dirs": []
-  }
-}
+| Option | Short | Description | Default |
+|--------|-------|-------------|---------|
+| `--index`, `-i` | `-i` | Index directory path | `./docs.index` |
+| `--device` | | Device: `auto`, `cpu`, `cuda`, `mps` | `auto` |
+| `--batch-size` | | Embedding batch size | `128` |
+| `--cache-dir` | | Model cache directory | `~/.cache/huggingface` |
+| `--verbose`, `-v` | `-v` | Verbose output | `false` |
+| `--version` | | Show version and exit | |
+
+## Search Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--top-k`, `-k` | Number of results | `5` |
+| `--top-files` | Files to consider at file level | `10` |
+| `--top-nodes` | Nodes to consider at node level | `50` |
+| `--min-score` | Minimum similarity score | `0.0` |
+| `--lexical-boost` | FTS lexical boost factor | `0.1` |
+| `--context` | Context: `parent_heading`, `full_ancestry`, `none` | `parent_heading` |
+| `--json` | Output as JSON | `false` |
+
+## Python Configuration
+
+```python
+from docsearch.config import Config, ChunkingConfig, IndexConfig, ModelConfig, SearchConfig
+
+config = Config(
+    model=ModelConfig(
+        name="BAAI/bge-small-en-v1.5",
+        device="auto",
+        batch_size=128,
+    ),
+    chunking=ChunkingConfig(
+        target_tokens=400,
+        overlap_tokens=50,
+        max_tokens=512,
+    ),
+    index=IndexConfig(path="./docs.index"),
+    search=SearchConfig(
+        top_k=5,
+        top_files=10,
+        top_nodes=50,
+        lexical_boost=0.1,
+        min_score=0.0,
+        context_expansion="parent_heading",
+    ),
+    # Directories to ignore during indexing
+    ignore_dirs=(".git", "node_modules", "__pycache__", ".venv", "venv"),
+    # Markdown file extensions
+    markdown_extensions=(".md", ".markdown"),
+    # Source code extensions (lower weight)
+    source_extensions=(
+        ".py", ".js", ".ts", ".tsx", ".jsx", ".c", ".h", ".cpp", ".hpp",
+        ".go", ".rs", ".java", ".kt", ".swift", ".rb", ".php",
+        ".sh", ".sql", ".toml", ".yaml", ".yml", ".json",
+    ),
+    # Weight for source code results (0.0-1.0)
+    source_weight=0.3,
+    # Auto reindex on search
+    auto_reindex=True,
+)
 ```
 
-## Configuration Options
+## Environment Variables
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `project_name` | string | "Project Name" | Display name for your project |
-| `project_url` | string | "" | Project repository URL |
-| `site_path_prefix` | string | "/" | URL path prefix for deployment |
-| `src_dir` | string | "src" | Source markdown directory |
-| `out_dir` | string | "site" | Output HTML directory |
-| `docs_dir` | string | "." | Docs root directory |
-| `sidebar` | array | [] | Navigation structure |
-| `source_files.patterns` | array | ["docs/src/*.md", "docs/*.js", "docs/*.css"] | Glob patterns for source files (see note below) |
-| `source_files.ignore_dirs` | array | [] | Directory names to skip |
+| Variable | Description |
+|----------|-------------|
+| `HF_HUB_DISABLE_PROGRESS_BARS` | Disable HF Hub progress bars |
+| `HF_HUB_DISABLE_TELEMETRY` | Disable HF Hub telemetry |
+| `TRANSFORMERS_VERBOSITY` | Transformers logging level |
+| `TOKENIZERS_PARALLELISM` | Tokenizer parallelism (true/false) |
 
-## Build Options
+## Indexing Configuration
 
-```json
-{
-  "build": {
-    "workers": 6,
-    "minify_html": true,
-    "optimize_html": true,
-    "zstd_level": 22,
-    "search_index_filename": "search_index.zst",
-    "git_meta_filename": "git_meta.json"
-  }
-}
-```
+- `ignore_dirs`: Directories to skip during indexing
+- `markdown_extensions`: File extensions treated as Markdown (full weight)
+- `source_extensions`: File extensions treated as source code (lower weight)
+- `source_weight`: Weight multiplier for source code results (default 0.3)
 
-## Feature Toggles
+## Search Tuning
 
-```json
-{
-  "features": {
-    "backlinks": true,
-    "related": true,
-    "auto_link": true,
-    "versioning": true,
-    "search": true,
-    "code_references": true,
-    "link_preview": true,
-    "code_highlighting": true,
-    "blockquotes": true,
-    "ext_tags": true
-  }
-}
-```
-
-## Versioning
-
-```json
-{
-  "versioning": {
-    "commit_message_pattern": "^\\s*([0-9]+[A-Za-z])\\s*[-:—–]\\s*(.+)",
-    "live_label": "Live"
-  }
-}
-```
-
-## Source Files
-
-The `source_files` configuration controls which files are indexed for code references and search:
-
-- `patterns`: Glob patterns (relative to each search directory). Use `*` for any filename, `**` for recursive.
-- `search_dirs`: Where to search. Options: `"parent"` (project root), `"src_parent"`, `"docs"`.
-- `ignore_dirs`: Directory names to skip during search.
-
-Add your own patterns to `patterns` to include additional file types or directories.
+- `top_k`: Final number of results returned
+- `top_files`: Files to score at file level (broad search)
+- `top_nodes`: Nodes to score within top files (detailed search)
+- `lexical_boost`: Weight for FTS5 exact match boost (0 to disable)
+- `context_expansion`: How much context to include in line ranges
+  - `parent_heading`: Expand to parent heading start
+  - `full_ancestry`: Expand to document root
+  - `none`: No expansion

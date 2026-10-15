@@ -23,6 +23,7 @@ class SemanticNode:
     content_hash: str = ""
     level: int = 0  # 0=file, 1=H1, 2=H2, etc.
     embedding_idx: int | None = None
+    weight: float = 1.0  # Search weight (1.0 for docs, <1.0 for source code)
 
     def __post_init__(self):
         if self.heading_path is None:
@@ -98,6 +99,7 @@ class IndexMetadata:
     created_at: float = 0.0
     updated_at: float = 0.0
     config_hash: str = ""
+    docs_path: str | None = None  # Path to the indexed documents
 
     def to_dict(self) -> dict:
         return {
@@ -109,6 +111,7 @@ class IndexMetadata:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "config_hash": self.config_hash,
+            "docs_path": self.docs_path,
         }
 
     @classmethod

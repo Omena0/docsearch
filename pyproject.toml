@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "docsearch"
-version = "0.1.0"
-description = "Fast local semantic search engine for Markdown documentation"
+version = "0.2.0"
+description = "Fast local semantic search engine for Markdown documentation and source code for agentic or human use"
 readme = "README.md"
 license = {file = "LICENSE.md"}
 requires-python = ">=3.10"

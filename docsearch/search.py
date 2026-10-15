@@ -42,9 +42,7 @@ def search_files(
     top_indices = top_indices[np.argsort(-scores[top_indices])]
 
     results = []
-    for idx in top_indices:
-        results.append((valid_nodes[idx], float(scores[idx])))
-
+    results.extend((valid_nodes[idx], float(scores[idx])) for idx in top_indices)
     return results
 
 
@@ -83,9 +81,10 @@ def search_nodes(
     top_indices = top_indices[np.argsort(-filtered_scores[top_indices])]
 
     results = []
-    for idx in top_indices:
-        results.append((filtered_nodes[idx], float(filtered_scores[idx])))
-
+    results.extend(
+        (filtered_nodes[idx], float(filtered_scores[idx]))
+        for idx in top_indices
+    )
     return results
 
 
@@ -147,24 +146,19 @@ def expand_context(
     parent_id = node.parent_id
     while parent_id:
         parent = next((n for n in all_nodes if n.id == parent_id), None)
-        if parent is None:
-            # Check file node
-            file_parent = next((f for f in file_nodes if f.id == parent_id), None)
-            if file_parent:
-                start = min(start, file_parent.start_line)
-                break
-        if parent:
-            if policy == "parent_heading":
-                start = min(start, parent.start_line)
-                break
-            elif policy == "full_ancestry":
-                start = min(start, parent.start_line)
-                parent_id = parent.parent_id
-            else:
-                break
+        if parent is None and (file_parent := next(
+            (f for f in file_nodes if f.id == parent_id), None
+        )):
+            start = min(start, file_parent.start_line)
+            break
+        if parent and policy == "full_ancestry":
+            start = min(start, parent.start_line)
+            parent_id = parent.parent_id
+        elif parent and policy == "parent_heading":
+            start = min(start, parent.start_line)
+            break
         else:
             break
-
     return start, end
 
 
@@ -239,8 +233,9 @@ def hierarchical_search(
     # Collect candidate nodes from top files
     candidate_nodes = []
     for file_node, file_score in file_results:
-        file_semantic = [n for n in semantic_nodes if n.file == file_node.file]
-        if file_semantic:
+        if file_semantic := [
+            n for n in semantic_nodes if n.file == file_node.file
+        ]:
             # Search within file
             node_results = search_nodes(
                 query_vec, file_semantic, embeddings,
@@ -251,16 +246,6 @@ def hierarchical_search(
                 combined_score = score * 0.7 + file_score * 0.3
                 candidate_nodes.append((node, combined_score))
 
-    # Sort by combined score
-    candidate_nodes.sort(key=lambda x: x[1], reverse=True)
-    candidate_nodes = candidate_nodes[:search_config.top_nodes]
-
-    # Level 2: Also search all nodes directly for completeness
-    all_node_results = search_nodes(
-        query_vec, semantic_nodes, embeddings,
-        search_config.top_nodes * 2, search_config.min_score
-    )
-
     # Combine and deduplicate
     seen_ids = set()
     combined: list[tuple[SemanticNode, float]] = []
@@ -269,10 +254,18 @@ def hierarchical_search(
             combined.append((node, score))
             seen_ids.add(node.id)
 
+    # Level 2: Also search all nodes directly for completeness
+    all_node_results = search_nodes(
+        query_vec, semantic_nodes, embeddings,
+        search_config.top_nodes * 2, search_config.min_score
+    )
     for node, score in all_node_results:
         if node.id not in seen_ids:
             combined.append((node, score))
             seen_ids.add(node.id)
+
+    # Apply source code weight
+    combined = [(node, score * node.weight) for node, score in combined]
 
     # Lexical boost (FTS)
     if search_config.lexical_boost > 0:
@@ -335,6 +328,17 @@ def search(
     if top_k is not None:
         config.search.top_k = top_k
 
+    # Check config for index path
+    index_path = Path(index_path)
+    if config.index is None:
+        from docsearch.config import IndexConfig
+        config.index = IndexConfig(path=index_path)
+
+    # Auto-reindex changed files if enabled
+    if config.auto_reindex:
+        from docsearch.index import check_and_reindex
+        check_and_reindex(config.index.path, config)
+
     # Open index
     config, embeddings, file_nodes, semantic_nodes = open_index(index_path, config)
 
@@ -342,10 +346,6 @@ def search(
     model = EmbeddingModel(config.model)
     query_vec = model.encode_queries([query])[0]
 
-    # Search
-    results = hierarchical_search(
-        query, config, query_vec,
-        file_nodes, semantic_nodes, embeddings
+    return hierarchical_search(
+        query, config, query_vec, file_nodes, semantic_nodes, embeddings
     )
-
-    return results

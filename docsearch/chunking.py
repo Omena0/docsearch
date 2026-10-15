@@ -22,9 +22,7 @@ def hash_content(text: str) -> str:
 
 def build_retrieval_text(heading_path: tuple[str, ...], content: str) -> str:
     """Build retrieval text with heading context."""
-    if heading_path:
-        return " > ".join(heading_path) + "\n\n" + content
-    return content
+    return " > ".join(heading_path) + "\n\n" + content if heading_path else content
 
 
 def create_file_node(

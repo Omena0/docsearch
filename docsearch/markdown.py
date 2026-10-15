@@ -56,9 +56,8 @@ def parse_markdown(file: str, content: str) -> ParsedDocument:
     fence_char = ""
 
     for i, line in enumerate(lines, 1):
-        # Check for fence start/end
-        fence_match = FENCE_RE.match(line)
-        if fence_match:
+        match = FENCE_RE.match(line)
+        if match:
             if not in_fence:
                 in_fence = True
                 fence_char = line[:3]
@@ -70,9 +69,7 @@ def parse_markdown(file: str, content: str) -> ParsedDocument:
         if in_fence:
             continue
 
-        # Check for heading
-        match = HEADING_RE.match(line)
-        if match:
+        if match := HEADING_RE.match(line):
             level = len(match.group(1))
             text = match.group(2).strip()
 

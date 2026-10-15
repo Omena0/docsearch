@@ -40,29 +40,47 @@ class DocSearchGroup(click.Group):
 
 def _build_config(ctx) -> object | None:
     """Build config lazily to improve startup time."""
+    import json
+
     from docsearch.config import Config, IndexConfig, ModelConfig, SearchConfig
 
-    model_config = ModelConfig(
-        device=None if ctx.obj.get("device") == "auto" else ctx.obj.get("device"),
-        batch_size=ctx.obj.get("batch_size", 128),
-        cache_dir=ctx.obj.get("cache_dir"),
-    )
-    config = Config(model=model_config)
-    config.index = IndexConfig(path=Path(ctx.obj["index_path"]))
+    index_path = Path(ctx.obj["index_path"])
+    config_file = index_path / "config.json"
+
+    if config_file.exists():
+        with open(config_file) as f:
+            saved_data = json.load(f)
+        config = Config.from_dict(saved_data)
+    else:
+        model_config = ModelConfig(
+            device=None if ctx.obj.get("device") == "auto" else ctx.obj.get("device"),
+            batch_size=ctx.obj.get("batch_size", 128),
+            cache_dir=ctx.obj.get("cache_dir"),
+        )
+        config = Config(model=model_config)
+
+    # Apply CLI overrides
+    if ctx.obj.get("device") is not None:
+        config.model.device = None if ctx.obj.get("device") == "auto" else ctx.obj.get("device")
+    config.model.batch_size = ctx.obj.get("batch_size", config.model.batch_size)
+    if ctx.obj.get("cache_dir") is not None:
+        config.model.cache_dir = ctx.obj.get("cache_dir")
+    config.index = IndexConfig(path=index_path)
     config.search = SearchConfig()
     return config
 
 
 @click.group(cls=DocSearchGroup, invoke_without_command=True)
-@click.option("--index", "-i", "index_path", type=click.Path(path_type=Path), default="docs.index",
-              help="Index directory path")
+@click.option("--index", "-i", "index_path", type=click.Path(path_type=Path), default=".",
+              help="Index directory path (default: current directory)")
 @click.option("--device", type=click.Choice(["auto", "cpu", "cuda", "mps"]), default="auto",
               help="Device for embedding model")
 @click.option("--batch-size", type=int, default=128, help="Batch size for embedding")
 @click.option("--cache-dir", type=click.Path(path_type=Path), help="Model cache directory")
 @click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+@click.option("--version", is_flag=True, help="Show version and exit")
 @click.pass_context
-def cli(ctx, index_path, device, batch_size, cache_dir, verbose):
+def cli(ctx, index_path, device, batch_size, cache_dir, verbose, version):
     """docsearch - Fast local semantic search for Markdown documentation.
 
     QUERY: Run a search query directly.
@@ -72,6 +90,10 @@ def cli(ctx, index_path, device, batch_size, cache_dir, verbose):
     docsearch index ./docs
     docsearch search "how does exec work?"
     """
+    if version:
+        import importlib.metadata
+        click.echo(f"docsearch {importlib.metadata.version('docsearch')}")
+        sys.exit(0)
     ctx.ensure_object(dict)
     ctx.obj["index_path"] = index_path
     ctx.obj["device"] = device
@@ -94,6 +116,12 @@ def index(ctx, docs_path, force):
 
     from docsearch.index import build_index
     metadata = build_index(docs_path, config.index.path, config, force_rebuild=force)
+
+    # Save config to index dir if it doesn't exist
+    config_file = config.index.path / "config.json"
+    if not config_file.exists():
+        import json
+        config_file.write_text(json.dumps(config.to_dict(), indent=2))
 
     click.echo(f"Indexed {metadata.file_count} files, {metadata.node_count} nodes")
     click.echo(f"Model: {metadata.model_name} (dim={metadata.embedding_dim})")

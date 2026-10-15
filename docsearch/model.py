@@ -70,7 +70,8 @@ class EmbeddingModel:
         """Load the embedding model."""
         cache_dir = self.config.cache_dir
         if cache_dir is None:
-            cache_dir = Path(os.environ.get("DOCSEARCH_CACHE", Path.home() / ".cache" / "docsearch"))
+            env = os.environ.get("DOCSEARCH_CACHE")
+            cache_dir = Path(env) if env else Path.home() / ".cache" / "docsearch"
 
         self._model = SentenceTransformer(
             self.config.name,
@@ -133,13 +134,17 @@ def _get_model(config: ModelConfig | None = None) -> EmbeddingModel:
     return EmbeddingModel.get_instance(config)
 
 
-def encode_documents(texts: list[str], batch_size: int = 128, config: ModelConfig | None = None) -> np.ndarray:
+def encode_documents(
+    texts: list[str], batch_size: int = 128, config: ModelConfig | None = None
+) -> np.ndarray:
     """Encode documents for indexing."""
     model = _get_model(config)
     return model.encode_documents(texts, batch_size=batch_size)
 
 
-def encode_queries(texts: list[str], batch_size: int = 128, config: ModelConfig | None = None) -> np.ndarray:
+def encode_queries(
+    texts: list[str], batch_size: int = 128, config: ModelConfig | None = None
+) -> np.ndarray:
     """Encode queries for search."""
     model = _get_model(config)
     return model.encode_queries(texts, batch_size=batch_size)

@@ -84,7 +84,8 @@ def init_database(index_path: Path, config: Config):
                 retrieval_text TEXT NOT NULL,
                 source_text TEXT NOT NULL,
                 level INTEGER DEFAULT 0,
-                embedding_idx INTEGER
+                embedding_idx INTEGER,
+                weight REAL DEFAULT 1.0
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_nodes_file ON nodes(file)")
@@ -98,22 +99,30 @@ def init_database(index_path: Path, config: Config):
         """)
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS nodes_ai AFTER INSERT ON nodes BEGIN
-                INSERT INTO nodes_fts(rowid, file, heading_text, heading_path, retrieval_text, source_text)
-                VALUES (new.rowid, new.file, new.heading_text, new.heading_path, new.retrieval_text, new.source_text);
+                INSERT INTO nodes_fts(rowid, file, heading_text, heading_path,
+                    retrieval_text, source_text)
+                VALUES (new.rowid, new.file, new.heading_text, new.heading_path,
+                    new.retrieval_text, new.source_text);
             END
         """)
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS nodes_ad AFTER DELETE ON nodes BEGIN
-                INSERT INTO nodes_fts(nodes_fts, rowid, file, heading_text, heading_path, retrieval_text, source_text)
-                VALUES ('delete', old.rowid, old.file, old.heading_text, old.heading_path, old.retrieval_text, old.source_text);
+                INSERT INTO nodes_fts(nodes_fts, rowid, file, heading_text, heading_path,
+                    retrieval_text, source_text)
+                VALUES ('delete', old.rowid, old.file, old.heading_text, old.heading_path,
+                    old.retrieval_text, old.source_text);
             END
         """)
         conn.execute("""
             CREATE TRIGGER IF NOT EXISTS nodes_au AFTER UPDATE ON nodes BEGIN
-                INSERT INTO nodes_fts(nodes_fts, rowid, file, heading_text, heading_path, retrieval_text, source_text)
-                VALUES ('delete', old.rowid, old.file, old.heading_text, old.heading_path, old.retrieval_text, old.source_text);
-                INSERT INTO nodes_fts(rowid, file, heading_text, heading_path, retrieval_text, source_text)
-                VALUES (new.rowid, new.file, new.heading_text, new.heading_path, new.retrieval_text, new.source_text);
+                INSERT INTO nodes_fts(nodes_fts, rowid, file, heading_text, heading_path,
+                    retrieval_text, source_text)
+                VALUES ('delete', old.rowid, old.file, old.heading_text, old.heading_path,
+                    old.retrieval_text, old.source_text);
+                INSERT INTO nodes_fts(rowid, file, heading_text, heading_path,
+                    retrieval_text, source_text)
+                VALUES (new.rowid, new.file, new.heading_text, new.heading_path,
+                    new.retrieval_text, new.source_text);
             END
         """)
 
@@ -152,7 +161,9 @@ def load_embeddings(index_path: Path) -> np.ndarray | None:
     return np.load(emb_path)
 
 
-def open_index(index_path: Path, config: Config | None = None) -> tuple[Config, np.ndarray, list[FileNode], list[SemanticNode]]:
+def open_index(
+    index_path: Path, config: Config | None = None
+) -> tuple[Config, np.ndarray, list[FileNode], list[SemanticNode]]:
     """Open an existing index."""
     index_path = Path(index_path).resolve()
 
@@ -162,12 +173,18 @@ def open_index(index_path: Path, config: Config | None = None) -> tuple[Config, 
 
     if config is None:
         config = Config()
-        config.index = type('obj', (object,), {'path': index_path, 'embedding_dim': metadata.embedding_dim})()
+        # Use a simple object with path and embedding_dim for compatibility
+        config.index = type(
+            'obj', (object,),
+            {'path': index_path, 'embedding_dim': metadata.embedding_dim}
+        )()
 
     # Verify model compatibility
     model = EmbeddingModel(config.model)
     if model.embedding_dim != metadata.embedding_dim:
-        raise ValueError(f"Model dimension mismatch: {model.embedding_dim} != {metadata.embedding_dim}")
+        raise ValueError(
+            f"Model dimension mismatch: {model.embedding_dim} != {metadata.embedding_dim}"
+        )
 
     # Load embeddings
     embeddings = load_embeddings(index_path)
@@ -181,12 +198,19 @@ def open_index(index_path: Path, config: Config | None = None) -> tuple[Config, 
     return config, embeddings, file_nodes, semantic_nodes
 
 
-def save_file_node(conn: sqlite3.Connection, node: FileNode, embedding_idx: int | None = None):
+def save_file_node(
+    conn: sqlite3.Connection, node: FileNode, embedding_idx: int | None = None
+):
     """Save file node to database."""
     conn.execute("""
-        INSERT OR REPLACE INTO files (id, file, start_line, end_line, content_hash, mtime, size, child_count, embedding_idx)
+        INSERT OR REPLACE INTO files
+            (id, file, start_line, end_line, content_hash, mtime,
+             size, child_count, embedding_idx)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (node.id, node.file, node.start_line, node.end_line, node.content_hash, 0, 0, node.child_count, embedding_idx))
+    """, (
+        node.id, node.file, node.start_line, node.end_line,
+        node.content_hash, 0, 0, node.child_count, embedding_idx,
+    ))
 
 
 def load_file_nodes(conn: sqlite3.Connection) -> list[FileNode]:
@@ -208,11 +232,16 @@ def load_file_nodes(conn: sqlite3.Connection) -> list[FileNode]:
     return nodes
 
 
-def save_semantic_node(conn: sqlite3.Connection, node: SemanticNode, embedding_idx: int | None = None):
+def save_semantic_node(
+    conn: sqlite3.Connection, node: SemanticNode, embedding_idx: int | None = None
+):
     """Save semantic node to database."""
     conn.execute("""
-        INSERT OR REPLACE INTO nodes (id, file, start_line, end_line, heading_level, heading_text, heading_path, parent_id, content_hash, retrieval_text, source_text, level, embedding_idx)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO nodes
+            (id, file, start_line, end_line, heading_level, heading_text,
+             heading_path, parent_id, content_hash, retrieval_text,
+             source_text, level, embedding_idx, weight)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         node.id,
         node.file,
@@ -227,6 +256,7 @@ def save_semantic_node(conn: sqlite3.Connection, node: SemanticNode, embedding_i
         node.source_text,
         node.level,
         embedding_idx,
+        node.weight,
     ))
 
 
@@ -253,6 +283,7 @@ def load_semantic_nodes(conn: sqlite3.Connection, file: str | None = None) -> li
             source_text=row["source_text"],
             level=row["level"],
             embedding_idx=row["embedding_idx"],
+            weight=row["weight"] if row["weight"] is not None else 1.0,
         )
         nodes.append(node)
     return nodes
@@ -266,7 +297,9 @@ def delete_file_nodes(conn: sqlite3.Connection, file: str):
 
 def get_file_info(conn: sqlite3.Connection, file: str) -> dict | None:
     """Get file info from database."""
-    row = conn.execute("SELECT content_hash, mtime, size FROM files WHERE file = ?", (file,)).fetchone()
+    row = conn.execute(
+        "SELECT content_hash, mtime, size FROM files WHERE file = ?", (file,)
+    ).fetchone()
     if row:
         return {"content_hash": row["content_hash"], "mtime": row["mtime"], "size": row["size"]}
     return None
@@ -298,8 +331,10 @@ def search_fts(conn: sqlite3.Connection, query: str, limit: int = 100) -> list[t
     fts_query = f'"{escaped}"'
 
     rows = conn.execute("""
-        SELECT n.file, n.id, n.start_line, n.end_line, n.heading_level, n.heading_text, n.heading_path,
-               n.parent_id, n.content_hash, n.retrieval_text, n.source_text, n.level,
+        SELECT n.file, n.id, n.start_line, n.end_line, n.heading_level,
+               n.heading_text, n.heading_path,
+               n.parent_id, n.content_hash, n.retrieval_text,
+               n.source_text, n.level,
                bm25(nodes_fts) as rank
         FROM nodes_fts
         JOIN nodes n ON nodes_fts.rowid = n.rowid

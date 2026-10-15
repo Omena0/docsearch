@@ -6,11 +6,11 @@ from pathlib import Path
 
 import numpy as np
 
+from docsearch.cache import load_cached_embeddings, save_cached_embeddings
 from docsearch.chunking import chunk_document, hash_content
 from docsearch.config import Config, IndexConfig
 from docsearch.markdown import parse_markdown
 from docsearch.model import EmbeddingModel
-from docsearch.search import search
 from docsearch.storage import (
     delete_file_nodes,
     get_all_files,
@@ -66,7 +66,9 @@ class DocSearchIndex:
         from docsearch.model import EmbeddingModel
         model = EmbeddingModel(config.model)
         if model.embedding_dim != metadata.embedding_dim:
-            raise ValueError(f"Model dimension mismatch: {model.embedding_dim} != {metadata.embedding_dim}")
+            raise ValueError(
+                f"Model dimension mismatch: {model.embedding_dim} != {metadata.embedding_dim}"
+            )
 
         # Load embeddings and nodes
         from docsearch.storage import (
@@ -101,6 +103,73 @@ class DocSearchIndex:
             self._semantic_nodes = load_semantic_nodes(conn)
         return metadata
 
+
+def _filter_files(all_files: list[Path], docs_path: Path, config: Config) -> list[Path]:
+    """Filter files by ignore_dirs, allowed_globs, and ignored_globs."""
+    from docsearch.config_loader import should_index_file
+    return [f for f in all_files if should_index_file(f, docs_path, config)]
+
+
+def check_and_reindex(index_path: Path, config: Config):
+    """Check if files have changed and reindex them if auto_reindex is enabled."""
+    if not config.auto_reindex:
+        return
+
+    index_path = Path(index_path)
+    metadata = load_metadata(index_path)
+    if metadata is None:
+        return  # No index to check
+
+    docs_path_str = metadata.docs_path
+    if docs_path_str is None:
+        return  # No docs path stored
+
+    docs_path = Path(docs_path_str)
+    if not docs_path.exists():
+        return  # Docs path doesn't exist
+
+    with get_connection(index_path) as conn:
+        # Get existing files
+        existing_files = set(get_all_files(conn))
+
+        # Find all files to index (Markdown + source code), respecting globs
+        all_files = []
+        for ext in config.markdown_extensions + config.source_extensions:
+            all_files.extend(docs_path.rglob(f"*{ext}"))
+
+        filtered_files = _filter_files(all_files, docs_path, config)
+
+        # Dry run: check each file against cache dir
+        files_to_update = []
+        indexed_files = set()
+
+        for filepath in filtered_files:
+            rel_path = str(filepath.relative_to(docs_path))
+            indexed_files.add(rel_path)
+
+            # Check if file has cached embeddings
+            current_hash = compute_file_hash(filepath)
+            cached = load_cached_embeddings(index_path, current_hash)
+            if cached is not None:
+                # Already cached - skip, move on
+                continue
+            else:
+                # Not cached - needs updating
+                files_to_update.append((filepath, current_hash, rel_path))
+
+        # Check for deleted files
+        deleted = existing_files - indexed_files
+        if deleted:
+            files_to_update.append(None)  # signal deletions exist
+
+        # If nothing to update and no deletions, return early
+        if not files_to_update:
+            return
+
+        # Reindex changed/deleted files
+        print("Auto-reindexing changed files...")  # noqa: T201
+        build_index(docs_path, index_path, config, force_rebuild=False)
+
     def save(self):
         """Save the index (embeddings are saved automatically during indexing)."""
         # Embeddings are already saved by build_index
@@ -110,7 +179,8 @@ class DocSearchIndex:
         """Search the index."""
         if self._embeddings is None:
             raise ValueError("Index not loaded. Call open() or index_directory() first.")
-        return search(query, self.config.index.path, self.config, top_k=top_k)
+        from docsearch.search import search as do_search
+        return do_search(query, self.config.index.path, self.config, top_k=top_k)
 
 
 def compute_file_hash(filepath: Path) -> str:
@@ -126,11 +196,21 @@ def index_file(
     model: EmbeddingModel,
     conn,
     embeddings_list: list[np.ndarray],
+    index_path: Path,
 ) -> tuple[FileNode, list[SemanticNode]]:
-    """Index a single Markdown file."""
+    """Index a single Markdown or source file."""
     rel_path = str(filepath.relative_to(root))
-    content = filepath.read_text(encoding="utf-8")
-    content_hash = hash_content(content)
+    is_source = filepath.suffix in config.source_extensions
+
+    if is_source:
+        content = filepath.read_text(encoding="utf-8", errors="replace")
+        content_hash = hash_content(content)
+    else:
+        content = filepath.read_text(encoding="utf-8")
+        content_hash = hash_content(content)
+
+    # Determine weight
+    weight = config.source_weight if is_source else 1.0
 
     # Parse and chunk
     parsed = parse_markdown(rel_path, content)
@@ -138,27 +218,63 @@ def index_file(
 
     # Update file node hash
     file_node.content_hash = content_hash
+    file_node.weight = weight
 
-    # Generate embeddings for nodes
+    # Generate embeddings for nodes (with cache lookup)
     if nodes:
-        retrieval_texts = [n.retrieval_text for n in nodes]
-        node_embeddings = model.encode_documents(retrieval_texts, show_progress=False)
+        # Look up cached embeddings for unchanged nodes
+        cached_embeddings = {}
+        texts_to_encode = []
+        node_indices = []  # tracks which nodes need encoding
+        for i, node in enumerate(nodes):
+            cached = load_cached_embeddings(index_path, node.content_hash)
+            if cached is not None:
+                cached_embeddings[i] = cached
+            else:
+                texts_to_encode.append(node.retrieval_text)
+                node_indices.append(i)
 
-        for node, emb in zip(nodes, node_embeddings, strict=True):
-            idx = len(embeddings_list)
-            embeddings_list.append(emb)
-            node.embedding = emb
-            save_semantic_node(conn, node, idx)
+        # Compute embeddings for uncached nodes
+        new_embeddings = []
+        if texts_to_encode:
+            new_embeddings = model.encode_documents(texts_to_encode, show_progress=False)
 
-        # Create file-level embedding as mean of children
-        file_emb = np.mean(node_embeddings, axis=0)
+        # Build node embeddings list
+        new_idx = 0
+        for i, node in enumerate(nodes):
+            if i in cached_embeddings:
+                node.embedding = cached_embeddings[i]
+            else:
+                node.embedding = new_embeddings[new_idx]
+                new_idx += 1
+            node.weight = weight
+
+        # Assemble embeddings list
+        for node in nodes:
+            embeddings_list.append(node.embedding)
+
+        # Compute file-level embedding as mean of children
+        file_emb = np.mean([n.embedding for n in nodes], axis=0)
         file_emb = file_emb / np.linalg.norm(file_emb)
-        file_idx = len(embeddings_list)
-        embeddings_list.append(file_emb)
-        file_node.embedding = file_emb
-    else:
-        file_idx = None
 
+        # Save file embedding
+        embeddings_list.append(file_emb)
+
+        # Save newly computed embeddings to cache
+        for i, node in enumerate(nodes):
+            if i not in cached_embeddings:
+                save_cached_embeddings(index_path, node.content_hash, node.embedding)
+
+        # Save semantic nodes to database
+        for i, node in enumerate(nodes):
+            save_semantic_node(conn, node, i)
+    else:
+        # Empty file - create zero vector for file embedding
+        file_emb = np.zeros(model.embedding_dim, dtype=np.float32)
+        embeddings_list.append(file_emb)
+
+    # Save file node
+    file_idx = len(embeddings_list) - 1
     save_file_node(conn, file_node, file_idx)
     return file_node, nodes
 
@@ -188,23 +304,17 @@ def build_index(
         # Get existing files
         existing_files = set(get_all_files(conn))
 
-        # Find all Markdown files
-        md_files = []
-        for ext in config.markdown_extensions:
-            md_files.extend(docs_path.rglob(f"*{ext}"))
+        # Find all files to index (Markdown + source code)
+        all_files = []
+        for ext in config.markdown_extensions + config.source_extensions:
+            all_files.extend(docs_path.rglob(f"*{ext}"))
 
-        # Filter ignored directories
-        filtered_files = []
-        for f in md_files:
-            if any(part in config.ignore_dirs for part in f.parts):
-                continue
-            filtered_files.append(f)
-
-        md_files = filtered_files
+        
+        filtered_files = _filter_files(all_files, docs_path, config)
 
         # Process files
         indexed_files = set()
-        for filepath in md_files:
+        for filepath in filtered_files:
             rel_path = str(filepath.relative_to(docs_path))
             indexed_files.add(rel_path)
 
@@ -213,17 +323,32 @@ def build_index(
             current_hash = compute_file_hash(filepath)
 
             if file_info and not force_rebuild and file_info["content_hash"] == current_hash:
-                # Unchanged, load existing embeddings
+                # Unchanged - load cached embeddings
                 file_nodes = load_file_nodes(conn)
+                semantic_nodes = load_semantic_nodes(conn)
                 file_node = next((fn for fn in file_nodes if fn.file == rel_path), None)
-                if file_node and file_node.embedding_idx is not None:
-                    # We'll load embeddings later
-                    pass
+                if file_node is not None:
+                    # Load cached embeddings for this file
+                    cached_file_emb = load_cached_embeddings(index_path, file_node.content_hash)
+                    if cached_file_emb is not None:
+                        embeddings_list.append(cached_file_emb)
+                    else:
+                        # Fallback: if file embedding not cached, load from DB
+                        if file_node.embedding is not None:
+                            embeddings_list.append(file_node.embedding)
+                    # Load cached embeddings for semantic nodes
+                    file_semantic_nodes = [n for n in semantic_nodes if n.file == rel_path]
+                    for node in file_semantic_nodes:
+                        cached = load_cached_embeddings(index_path, node.content_hash)
+                        if cached is not None:
+                            embeddings_list.append(cached)
+                        elif node.embedding is not None:
+                            embeddings_list.append(node.embedding)
                 continue
 
             # Index or re-index file
             print(f"Indexing: {rel_path}")  # noqa: T201
-            index_file(filepath, docs_path, config, model, conn, embeddings_list)
+            index_file(filepath, docs_path, config, model, conn, embeddings_list, index_path)
 
         # Remove deleted files
         deleted = existing_files - indexed_files
@@ -231,13 +356,12 @@ def build_index(
             print(f"Removing: {file}")  # noqa: T201
             delete_file_nodes(conn, file)
 
-        # Load existing embeddings for unchanged files
+        # Save embeddings
         if embeddings_list:
             all_embeddings = np.vstack(embeddings_list)
         else:
             all_embeddings = np.empty((0, model.embedding_dim), dtype=np.float32)
 
-        # Save embeddings
         save_embeddings(index_path, all_embeddings)
 
         # Create metadata
@@ -250,6 +374,7 @@ def build_index(
             created_at=start_time,
             updated_at=time.time(),
             config_hash=hash_content(str(config)),
+            docs_path=str(docs_path),
         )
         save_metadata(index_path, metadata)
 

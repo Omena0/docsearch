@@ -1,40 +1,42 @@
 # Quickstart
 
-## 1. Initialize your docs
+Get up and running with docsearch in minutes.
+
+## 1. Index your documentation
 
 ```bash
-fr-docs init
+docsearch index ./my-docs
 ```
 
-This creates a `docs/` directory with sample configuration and content.
+This will:
+- Parse all `.md` and source code files
+- Create embeddings using BGE-small-en-v1.5
+- Store the index in `./docs.index` (default)
 
-## 2. Edit your configuration
-
-Open `docs/config.json` and customize:
-- `project_name`: Your project name
-- `project_url`: Your project repository URL
-- `sidebar`: Navigation structure
-
-## 3. Write your documentation
-
-Add markdown files to `docs/src/` following the sidebar structure.
-
-## 4. Build your docs
+## 2. Search your docs
 
 ```bash
-fr-docs build
+docsearch "search query here"
 ```
 
-The output will be in `docs/site/`.
+Results show:
+- File path and line numbers
+- Heading hierarchy (e.g., `H1 > H2 > H3`)
+- Full markdown context under the matched heading
+- Relevance score (0.0 to 1.0)
 
-## 5. Preview locally
+## 3. Rebuild when docs change
 
 ```bash
-cd docs/site && python -m http.server 8000
+docsearch rebuild ./my-docs
 ```
 
-Then open http://localhost:8000
+Or use auto-reindex: the index automatically checks for file changes on each search (configurable).
 
-## 6. Deploy
+## 4. Get help
 
-Upload the `docs/site/` directory to your hosting provider (Netlify, Vercel, GitHub Pages, etc.)
+```bash
+docsearch --help
+# or
+docsearch <command> --help
+```
