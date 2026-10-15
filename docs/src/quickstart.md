@@ -9,6 +9,7 @@ docsearch index ./my-docs
 ```
 
 This will:
+
 - Parse all `.md` and source code files
 - Create embeddings using BGE-small-en-v1.5
 - Store the index in `./docs.index` (default)
@@ -20,6 +21,7 @@ docsearch "search query here"
 ```
 
 Results show:
+
 - File path and line numbers
 - Heading hierarchy (e.g., `H1 > H2 > H3`)
 - Full markdown context under the matched heading

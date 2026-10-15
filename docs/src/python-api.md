@@ -37,6 +37,7 @@ index = DocSearchIndex.create("./docs.index", config)
 ```
 
 **Parameters:**
+
 - `index_path` (str|Path): Path to index directory
 - `config` (Config, optional): Configuration object
 
@@ -51,6 +52,7 @@ index = DocSearchIndex.open("./docs.index")
 ```
 
 **Parameters:**
+
 - `index_path` (str|Path): Path to index directory
 - `config` (Config, optional): Configuration object
 
@@ -67,6 +69,7 @@ metadata = index.index_directory("./docs", force_rebuild=True)
 ```
 
 **Parameters:**
+
 - `docs_path` (str|Path): Path to documentation directory
 - `force_rebuild` (bool): Force full rebuild
 
@@ -81,6 +84,7 @@ results = index.search("query", top_k=10)
 ```
 
 **Parameters:**
+
 - `query` (str): Search query
 - `top_k` (int): Number of results
 
@@ -91,7 +95,7 @@ results = index.search("query", top_k=10)
 Each search result contains:
 
 | Attribute | Type | Description |
-|-----------|------|-------------|
+| ----------- | ------ | ------------- |
 | `file` | str | Source file path |
 | `start_line` | int | Start line number |
 | `end_line` | int | End line number |
