@@ -67,7 +67,7 @@
     "backlinks": false,
     "related": false,
     "auto_link": true,
-    "versioning": false,
+    "versioning": true,
     "search": true,
     "code_references": false,
     "link_preview": true,
