@@ -34,7 +34,7 @@ PYPI_URL = "https://pypi.org/pypi/fr-docs/json"
 
 
 def log(message: str) -> None:
-    pass
+    print(message, file=sys.stderr)
 
 
 def letter_to_minor(letter: str) -> int:
@@ -107,17 +107,26 @@ def main() -> int:
     if subject is None:
         if event == "workflow_dispatch":
             # No version code anywhere in history: start at 0.1.0
+            print("version=0.1.0")
+            print("release_title=0A")
+            print("should_publish=true")
             return 0
+        print("should_publish=false")
         log("Skipping publish — no version prefix in commit history")
         return 0
 
     match = CODE_RE.match(subject)
     assert match is not None
-    match.group(0)
+    code = match.group(0)
     major, minor_letter = match.groups()
     minor = letter_to_minor(minor_letter)
-    next_patch(major, minor, base=0)
+    patch = next_patch(major, minor, base=0)
+    version = f"{major}.{minor}.{patch}"
+    release_title = code if patch == 0 else f"{code}{patch}"
 
+    print(f"version={version}")
+    print(f"release_title={release_title}")
+    print("should_publish=true")
     return 0
 
 
