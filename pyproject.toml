@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "docsearch"
+name = "frdocsearch"
 version = "0.2.0"
 description = "Fast local semantic search engine for Markdown documentation and source code for agentic or human use"
 readme = "README.md"
@@ -45,6 +45,10 @@ include = ["docsearch*"]
 line-length = 100
 target-version = "py310"
 lint.select = ["E", "F", "I", "UP", "B", "C4", "SIM", "T20"]
+
+[tool.ruff.lint.per-file-ignores]
+# This CI helper legitimately writes key=value pairs to stdout for $GITHUB_OUTPUT.
+"scripts/derive_version.py" = ["T20"]
 
 [tool.mypy]
 python_version = "3.10"
